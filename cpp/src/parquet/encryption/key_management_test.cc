@@ -294,16 +294,16 @@ TEST_F(TestEncryptionKeyManagement, CheckKeyRotationDoubleWrapping) {
       false);  // key rotation is not supported with local key wrapping
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->WriteEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+    this->WriteEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
   }
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->ReadEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+    this->ReadEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
   }
 
   this->RotateKeys(double_wrapping);
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->ReadEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+    this->ReadEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
   }
 }
 
@@ -315,43 +315,18 @@ TEST_F(TestEncryptionKeyManagement, CheckKeyRotationSingleWrapping) {
       false);  // key rotation is not supported with local key wrapping
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->WriteEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+    this->WriteEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
   }
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->ReadEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+    this->ReadEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
   }
 
   this->RotateKeys(double_wrapping);
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->ReadEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+    this->ReadEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
   }
 }
-
-/*TEST_F(TestEncryptionKeyManagement, CheckKeyRotationSingleWrapping) {
-  bool internal_key_material = false;
-  bool double_wrapping = false;
-  this->SetupCryptoFactory(
-      false);  // key rotation is not supported with local key wrapping
-
-    for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-      this->WriteEncryptedParquetFile(double_wrapping, encryption_no,
-                                      internal_key_material);
-    }
-
-
-    for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-      this->ReadEncryptedParquetFile(double_wrapping, encryption_no,
-                                     internal_key_material);
-    }
-
-  this->RotateKeys(double_wrapping);
-    for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-      this->ReadEncryptedParquetFile(double_wrapping, encryption_no,
-                                     internal_key_material);
-
-  }
-}*/
 
 TEST_F(TestEncryptionKeyManagementMultiThread, WrapLocally) {
   this->SetupCryptoFactory(true);
