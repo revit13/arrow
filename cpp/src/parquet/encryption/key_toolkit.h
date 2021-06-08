@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 
+#include "parquet/encryption/file_path.h"
 #include "parquet/encryption/key_encryption_key.h"
 #include "parquet/encryption/kms_client.h"
 #include "parquet/encryption/kms_client_factory.h"
@@ -29,11 +30,18 @@
 namespace parquet {
 namespace encryption {
 
+// in miliseconds
+using TimePoint = std::chrono::system_clock::time_point;
+
+static constexpr uint64_t kCacheCleanPeriodForKeyRotation = 60 * 60 * 1000;  // 1 hour
+
 // KeyToolkit is a utility that keeps various tools for key management (such as key
 // rotation, kms client instantiation, cache control, etc), plus a number of auxiliary
 // classes for internal use.
 class PARQUET_EXPORT KeyToolkit {
  public:
+  KeyToolkit() { last_cache_clean_for_key_rotation_time_ = internal::CurrentTimePoint(); }
+
   /// KMS client two level cache: token -> KMSInstanceId -> KmsClient
   TwoLevelCacheWithExpiration<std::shared_ptr<KmsClient>>& kms_client_cache_per_token() {
     return kms_client_cache_;
@@ -51,7 +59,8 @@ class PARQUET_EXPORT KeyToolkit {
   }
 
   std::shared_ptr<KmsClient> GetKmsClient(
-      const KmsConnectionConfig& kms_connection_config, double cache_entry_lifetime_ms);
+      const KmsConnectionConfig& kms_connection_config,
+      double cache_entry_lifetime_ms);
 
   /// Flush any caches that are tied to the (compromised) access_token
   void RemoveCacheEntriesForToken(const std::string& access_token);
@@ -65,11 +74,22 @@ class PARQUET_EXPORT KeyToolkit {
     kms_client_factory_ = kms_client_factory;
   }
 
+  /// Key rotation. In the single wrapping mode, decrypts data keys with old master keys,
+  /// then encrypts them with new master keys. In the double wrapping mode, decrypts KEKs
+  /// (key encryption keys) with old master keys, generates new KEKs and encrypts them
+  /// with new master keys. Works only if key material is not stored internally in file
+  /// footers. Not supported in local key wrapping mode. Method can be run by multiple
+  /// threads, but each thread must work on a different folder.
+  void RotateMasterKeys(const KmsConnectionConfig& kms_connection_config,
+                        const std::shared_ptr<FilePath>& folder_path,
+                        bool double_wrapping, uint64_t cache_lifetime_seconds);
+
  private:
   TwoLevelCacheWithExpiration<std::shared_ptr<KmsClient>> kms_client_cache_;
   TwoLevelCacheWithExpiration<KeyEncryptionKey> key_encryption_key_write_cache_;
   TwoLevelCacheWithExpiration<std::string> key_encryption_key_read_cache_;
   std::shared_ptr<KmsClientFactory> kms_client_factory_;
+  internal::TimePoint last_cache_clean_for_key_rotation_time_;
 };
 
 }  // namespace encryption

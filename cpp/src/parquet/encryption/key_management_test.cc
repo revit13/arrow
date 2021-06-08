@@ -22,6 +22,10 @@
 #include <thread>
 #include <unordered_map>
 
+#include "arrow/filesystem/filesystem.h"
+#include "arrow/filesystem/localfs.h"
+#include "arrow/status.h"
+#include "arrow/testing/gtest_util.h"
 #include "arrow/testing/util.h"
 #include "arrow/util/logging.h"
 
@@ -42,16 +46,22 @@ class TestEncryptionKeyManagement : public ::testing::Test {
   void SetUp() {
     key_list_ = BuildKeyMap(kColumnMasterKeyIds, kColumnMasterKeys, kFooterMasterKeyId,
                             kFooterMasterKey);
+    new_key_list_ = BuildKeyMap(kColumnMasterKeyIds, kNewColumnMasterKeys,
+                                kFooterMasterKeyId, kNewFooterMasterKey);
+    /// new_key_list_ = BuildKeyMap(kColumnMasterKeyIds, kColumnMasterKeys,
+    //                          kFooterMasterKeyId, kFooterMasterKey);
     column_key_mapping_ = BuildColumnKeyMapping();
+    temp_dir = temp_data_dir().ValueOrDie();
   }
 
-  static void SetUpTestCase();
+  // static void SetUpTestCase();
 
  protected:
   FileEncryptor encryptor_;
   FileDecryptor decryptor_;
 
   std::unordered_map<std::string, std::string> key_list_;
+  std::unordered_map<std::string, std::string> new_key_list_;
   std::string column_key_mapping_;
   KmsConnectionConfig kms_connection_config_;
   CryptoFactory crypto_factory_;
@@ -64,10 +74,13 @@ class TestEncryptionKeyManagement : public ::testing::Test {
     crypto_factory_.RegisterKmsClientFactory(kms_client_factory);
   }
 
-  std::string GetFileName(bool double_wrapping, bool wrap_locally, int encryption_no) {
+  std::string GetFileName(bool double_wrapping, bool wrap_locally,
+                          bool internal_key_material, int encryption_no) {
     std::string file_name;
     file_name += double_wrapping ? "double_wrapping" : "no_double_wrapping";
     file_name += wrap_locally ? "-wrap_locally" : "-wrap_on_server";
+    file_name +=
+        internal_key_material ? "-internal_key_material" : "-external_key_metrial";
     switch (encryption_no) {
       case 0:
         file_name += "-encrypt_columns_and_footer_diff_keys";
@@ -90,6 +103,7 @@ class TestEncryptionKeyManagement : public ::testing::Test {
   }
 
   EncryptionConfiguration GetEncryptionConfiguration(bool double_wrapping,
+                                                     bool internal_key_material,
                                                      int encryption_no) {
     EncryptionConfiguration encryption(kFooterMasterKeyId);
     encryption.double_wrapping = double_wrapping;
@@ -119,6 +133,7 @@ class TestEncryptionKeyManagement : public ::testing::Test {
         ARROW_LOG(FATAL) << "Invalid encryption_no";
     }
 
+    encryption.internal_key_material = internal_key_material;
     return encryption;
   }
 
@@ -126,26 +141,73 @@ class TestEncryptionKeyManagement : public ::testing::Test {
     return DecryptionConfiguration();
   }
 
-  void WriteEncryptedParquetFile(bool double_wrapping, int encryption_no) {
-    std::string file_name = GetFileName(double_wrapping, wrap_locally_, encryption_no);
-    auto encryption_config = GetEncryptionConfiguration(double_wrapping, encryption_no);
+  void WriteEncryptedParquetFile(bool double_wrapping, int encryption_no,
+                                 bool internal_key_material = true) {
+    std::string file_name =
+        GetFileName(double_wrapping, wrap_locally_, internal_key_material, encryption_no);
 
-    auto file_encryption_properties = crypto_factory_.GetFileEncryptionProperties(
-        kms_connection_config_, encryption_config);
+    auto encryption_config =
+        GetEncryptionConfiguration(double_wrapping, internal_key_material, encryption_no);
+
     std::string file = temp_dir->path().ToString() + file_name;
-
-    encryptor_.EncryptFile(file, file_encryption_properties);
+    if (internal_key_material) {
+      auto file_encryption_properties = crypto_factory_.GetFileEncryptionProperties(
+          kms_connection_config_, encryption_config);
+      encryptor_.EncryptFile(file, file_encryption_properties);
+    } else {
+      ::arrow::Result<std::shared_ptr<::arrow::fs::FileSystem>> filesystem =
+          MakeLocalFileSystem();
+      std::shared_ptr<FilePath> writable = std::make_shared<FilePath>(
+          temp_dir->path().ToString(), file_name, filesystem.ValueOrDie());
+      auto file_encryption_properties = crypto_factory_.GetFileEncryptionProperties(
+          kms_connection_config_, encryption_config, writable);
+      encryptor_.EncryptFile(file, file_encryption_properties);
+    }
   }
 
-  void ReadEncryptedParquetFile(bool double_wrapping, int encryption_no) {
+  void ReadEncryptedParquetFile(bool double_wrapping, int encryption_no,
+                                bool internal_key_material = true) {
     auto decryption_config = GetDecryptionConfiguration();
-    std::string file_name = GetFileName(double_wrapping, wrap_locally_, encryption_no);
-
-    auto file_decryption_properties = crypto_factory_.GetFileDecryptionProperties(
-        kms_connection_config_, decryption_config);
+    std::string file_name =
+        GetFileName(double_wrapping, wrap_locally_, internal_key_material, encryption_no);
     std::string file = temp_dir->path().ToString() + file_name;
+    if (internal_key_material) {
+      auto file_decryption_properties = crypto_factory_.GetFileDecryptionProperties(
+          kms_connection_config_, decryption_config);
 
-    decryptor_.DecryptFile(file, file_decryption_properties);
+      decryptor_.DecryptFile(file, file_decryption_properties);
+    } else {
+      ::arrow::Result<std::shared_ptr<::arrow::fs::FileSystem>> filesystem =
+          MakeLocalFileSystem();
+      std::string file_name = GetFileName(double_wrapping, wrap_locally_,
+                                          internal_key_material, encryption_no);
+      std::shared_ptr<FilePath> readable = std::make_shared<FilePath>(
+          temp_dir->path().ToString(), file_name, filesystem.ValueOrDie());
+      auto file_decryption_properties = crypto_factory_.GetFileDecryptionProperties(
+          kms_connection_config_, decryption_config, readable);
+
+      decryptor_.DecryptFile(file, file_decryption_properties);
+    }
+  }
+
+  void RotateKeys(bool double_wrapping) {
+    ::arrow::Result<std::shared_ptr<::arrow::fs::FileSystem>> filesystem =
+        MakeLocalFileSystem();
+
+    std::string empty_string;
+    std::shared_ptr<FilePath> readable = std::make_shared<FilePath>(
+        temp_dir->path().ToString(), empty_string, filesystem.ValueOrDie());
+
+    TestOnlyInServerWrapKms::StartKeyRotation(new_key_list_);
+    std::cout << "Start master key rotation" << std::endl;
+    std::cout << "Rotate master keys in folder: " + temp_dir->path().ToString()
+              << std::endl;
+    crypto_factory_.RotateMasterKeys(kms_connection_config_, readable, double_wrapping);
+    TestOnlyInServerWrapKms::FinishKeyRotation();
+    std::cout << "--> Finish master key rotation" << std::endl;
+    crypto_factory_.RemoveCacheEntriesForAllTokens();
+    std::cout << "--> Read files again with new keys " << temp_dir->path().ToString()
+              << std::endl;
   }
 };
 
@@ -183,10 +245,14 @@ class TestEncryptionKeyManagementMultiThread : public TestEncryptionKeyManagemen
 TEST_F(TestEncryptionKeyManagement, WrapLocally) {
   this->SetupCryptoFactory(true);
 
-  for (const bool double_wrapping : {false, true}) {
-    for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-      this->WriteEncryptedParquetFile(double_wrapping, encryption_no);
-      this->ReadEncryptedParquetFile(double_wrapping, encryption_no);
+  for (const bool internal_key_material : {false, true}) {
+    for (const bool double_wrapping : {false, true}) {
+      for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+        this->WriteEncryptedParquetFile(double_wrapping, encryption_no,
+                                        internal_key_material);
+        this->ReadEncryptedParquetFile(double_wrapping, encryption_no,
+                                       internal_key_material);
+      }
     }
   }
 }
@@ -194,13 +260,98 @@ TEST_F(TestEncryptionKeyManagement, WrapLocally) {
 TEST_F(TestEncryptionKeyManagement, WrapOnServer) {
   this->SetupCryptoFactory(false);
 
-  for (const bool double_wrapping : {false, true}) {
-    for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-      this->WriteEncryptedParquetFile(double_wrapping, encryption_no);
-      this->ReadEncryptedParquetFile(double_wrapping, encryption_no);
+  for (const bool internal_key_material : {false, true}) {
+    for (const bool double_wrapping : {false, true}) {
+      for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+        this->WriteEncryptedParquetFile(double_wrapping, encryption_no,
+                                        internal_key_material);
+        this->ReadEncryptedParquetFile(double_wrapping, encryption_no,
+                                       internal_key_material);
+      }
     }
   }
 }
+
+TEST_F(TestEncryptionKeyManagement, CheckExternalKeyStoreWithNullFilePath) {
+  bool internal_key_material = false;
+  bool double_wrapping = true;
+  int encryption_no = 0;
+  this->SetupCryptoFactory(false);
+
+  auto encryption_config =
+      GetEncryptionConfiguration(double_wrapping, internal_key_material, encryption_no);
+
+  EXPECT_THROW(crypto_factory_.GetFileEncryptionProperties(kms_connection_config_,
+                                                           encryption_config),
+               ParquetException);
+}
+
+TEST_F(TestEncryptionKeyManagement, CheckKeyRotationDoubleWrapping) {
+  bool internal_key_material =
+      false;  // Key rotation is not supported for internal key material
+  bool double_wrapping = true;
+  this->SetupCryptoFactory(
+      false);  // key rotation is not supported with local key wrapping
+
+  for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+    this->WriteEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+  }
+
+  for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+    this->ReadEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+  }
+
+  this->RotateKeys(double_wrapping);
+  for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+    this->ReadEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+  }
+}
+
+TEST_F(TestEncryptionKeyManagement, CheckKeyRotationSingleWrapping) {
+  bool internal_key_material =
+      false;  // Key rotation is not supported for internal key material
+  bool double_wrapping = false;
+  this->SetupCryptoFactory(
+      false);  // key rotation is not supported with local key wrapping
+
+  for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+    this->WriteEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+  }
+
+  for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+    this->ReadEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+  }
+
+  this->RotateKeys(double_wrapping);
+  for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+    this->ReadEncryptedParquetFile(double_wrapping, 3, internal_key_material);
+  }
+}
+
+/*TEST_F(TestEncryptionKeyManagement, CheckKeyRotationSingleWrapping) {
+  bool internal_key_material = false;
+  bool double_wrapping = false;
+  this->SetupCryptoFactory(
+      false);  // key rotation is not supported with local key wrapping
+
+    for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+      this->WriteEncryptedParquetFile(double_wrapping, encryption_no,
+                                      internal_key_material);
+    }
+
+
+    for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+      this->ReadEncryptedParquetFile(double_wrapping, encryption_no,
+                                     internal_key_material);
+    }
+
+  this->RotateKeys(double_wrapping);
+    for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+      this->ReadEncryptedParquetFile(double_wrapping, encryption_no,
+                                     internal_key_material);
+
+  }
+}*/
 
 TEST_F(TestEncryptionKeyManagementMultiThread, WrapLocally) {
   this->SetupCryptoFactory(true);
@@ -215,10 +366,6 @@ TEST_F(TestEncryptionKeyManagementMultiThread, WrapOnServer) {
   this->WriteEncryptedParquetFiles();
   this->ReadEncryptedParquetFiles();
 }
-
-// Set temp_dir before running the write/read tests. The encrypted files will
-// be written/read from this directory.
-void TestEncryptionKeyManagement::SetUpTestCase() { temp_dir = *temp_data_dir(); }
 
 }  // namespace test
 }  // namespace encryption
