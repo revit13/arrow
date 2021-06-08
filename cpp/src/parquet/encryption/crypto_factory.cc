@@ -22,7 +22,6 @@
 #include "arrow/util/string_view.h"
 
 #include "parquet/encryption/crypto_factory.h"
-
 #include "parquet/encryption/encryption_internal.h"
 #include "parquet/encryption/file_key_unwrapper.h"
 #include "parquet/encryption/file_path.h"
@@ -50,7 +49,7 @@ std::shared_ptr<FileEncryptionProperties> CryptoFactory::GetFileEncryptionProper
   const std::string& footer_key_id = encryption_config.footer_key;
   const std::string& column_key_str = encryption_config.column_keys;
 
-  std::shared_ptr<FileKeyMaterialStore> key_material_store = nullptr;
+  std::shared_ptr<FileKeyMaterialStore> key_material_store = NULL;
   if (!encryption_config.internal_key_material) {
     if (parquet_file_path == nullptr) {
       std::stringstream ss;

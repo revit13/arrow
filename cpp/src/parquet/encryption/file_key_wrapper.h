@@ -63,7 +63,7 @@ class PARQUET_EXPORT FileKeyWrapper {
   std::string GetEncryptionKeyMetadata(const std::string& data_key,
                                        const std::string& master_key_id,
                                        bool is_footer_key,
-									   std::string key_id_in_file = "");
+                                       std::string key_id_in_file = "");
 
  private:
   KeyEncryptionKey CreateKeyEncryptionKey(const std::string& master_key_id);

@@ -54,8 +54,6 @@ class TestEncryptionKeyManagement : public ::testing::Test {
     temp_dir = temp_data_dir().ValueOrDie();
   }
 
-  // static void SetUpTestCase();
-
  protected:
   FileEncryptor encryptor_;
   FileDecryptor decryptor_;
@@ -294,7 +292,8 @@ TEST_F(TestEncryptionKeyManagement, CheckKeyRotationDoubleWrapping) {
       false);  // key rotation is not supported with local key wrapping
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->WriteEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
+    this->WriteEncryptedParquetFile(double_wrapping, encryption_no,
+                                    internal_key_material);
   }
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
@@ -315,7 +314,8 @@ TEST_F(TestEncryptionKeyManagement, CheckKeyRotationSingleWrapping) {
       false);  // key rotation is not supported with local key wrapping
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->WriteEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
+    this->WriteEncryptedParquetFile(double_wrapping, encryption_no,
+                                    internal_key_material);
   }
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
