@@ -61,13 +61,14 @@ void KeyToolkit::RotateMasterKeys(const KmsConnectionConfig& kms_connection_conf
                                   bool double_wrapping, uint64_t cache_lifetime_seconds) {
   // If process wrote files with double-wrapped keys, clean KEK cache (since master keys
   // are changing). Only once for each key rotation cycle; not for every folder
-  internal::TimePoint now = internal::CurrentTimePoint();
-  if (now < last_cache_clean_for_key_rotation_time_ +
-                std::chrono::milliseconds(kCacheCleanPeriodForKeyRotation)) {
-    key_encryption_key_write_cache_.Clear();
+  const auto now = internal::CurrentTimePoint();
+  auto lock = last_cache_clean_for_key_rotation_time_mutex_.Lock();
+  if (now > last_cache_clean_for_key_rotation_time_ +
+                std::chrono::duration<double>(kCacheCleanPeriodForKeyRotation)) {
+    kek_write_cache_per_token().Clear();
     last_cache_clean_for_key_rotation_time_ = now;
   }
-  RemoveCacheEntriesForAllTokens();
+  lock.Unlock();
   std::vector<::arrow::fs::FileInfo> parquet_files_in_folder;
   ::arrow::fs::FileSelector s;
   s.base_dir = folder_path->parent();

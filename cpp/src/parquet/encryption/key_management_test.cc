@@ -139,8 +139,8 @@ class TestEncryptionKeyManagement : public ::testing::Test {
     return DecryptionConfiguration();
   }
 
-  void WriteEncryptedParquetFile(bool double_wrapping, int encryption_no,
-                                 bool internal_key_material = true) {
+  void WriteEncryptedParquetFile(bool double_wrapping, bool internal_key_material,
+                                 int encryption_no) {
     std::string file_name =
         GetFileName(double_wrapping, wrap_locally_, internal_key_material, encryption_no);
 
@@ -163,8 +163,8 @@ class TestEncryptionKeyManagement : public ::testing::Test {
     }
   }
 
-  void ReadEncryptedParquetFile(bool double_wrapping, int encryption_no,
-                                bool internal_key_material = true) {
+  void ReadEncryptedParquetFile(bool double_wrapping, bool internal_key_material,
+                                int encryption_no) {
     auto decryption_config = GetDecryptionConfiguration();
     std::string file_name =
         GetFileName(double_wrapping, wrap_locally_, internal_key_material, encryption_no);
@@ -213,11 +213,15 @@ class TestEncryptionKeyManagementMultiThread : public TestEncryptionKeyManagemen
  protected:
   void WriteEncryptedParquetFiles() {
     std::vector<std::thread> write_threads;
-    for (const bool double_wrapping : {false, true}) {
-      for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-        write_threads.push_back(std::thread([this, double_wrapping, encryption_no]() {
-          this->WriteEncryptedParquetFile(double_wrapping, encryption_no);
-        }));
+    for (const bool internal_key_material : {false, true}) {
+      for (const bool double_wrapping : {false, true}) {
+        for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+          write_threads.push_back(std::thread(
+              [this, double_wrapping, internal_key_material, encryption_no]() {
+                this->WriteEncryptedParquetFile(double_wrapping, internal_key_material,
+                                                encryption_no);
+              }));
+        }
       }
     }
     for (auto& th : write_threads) {
@@ -227,11 +231,15 @@ class TestEncryptionKeyManagementMultiThread : public TestEncryptionKeyManagemen
 
   void ReadEncryptedParquetFiles() {
     std::vector<std::thread> read_threads;
-    for (const bool double_wrapping : {false, true}) {
-      for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-        read_threads.push_back(std::thread([this, double_wrapping, encryption_no]() {
-          this->ReadEncryptedParquetFile(double_wrapping, encryption_no);
-        }));
+    for (const bool internal_key_material : {false, true}) {
+      for (const bool double_wrapping : {false, true}) {
+        for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
+          read_threads.push_back(std::thread(
+              [this, double_wrapping, internal_key_material, encryption_no]() {
+                this->ReadEncryptedParquetFile(double_wrapping, internal_key_material,
+                                               encryption_no);
+              }));
+        }
       }
     }
     for (auto& th : read_threads) {
@@ -246,10 +254,10 @@ TEST_F(TestEncryptionKeyManagement, WrapLocally) {
   for (const bool internal_key_material : {false, true}) {
     for (const bool double_wrapping : {false, true}) {
       for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-        this->WriteEncryptedParquetFile(double_wrapping, encryption_no,
-                                        internal_key_material);
-        this->ReadEncryptedParquetFile(double_wrapping, encryption_no,
-                                       internal_key_material);
+        this->WriteEncryptedParquetFile(double_wrapping, internal_key_material,
+                                        encryption_no);
+        this->ReadEncryptedParquetFile(double_wrapping, internal_key_material,
+                                       encryption_no);
       }
     }
   }
@@ -261,10 +269,10 @@ TEST_F(TestEncryptionKeyManagement, WrapOnServer) {
   for (const bool internal_key_material : {false, true}) {
     for (const bool double_wrapping : {false, true}) {
       for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-        this->WriteEncryptedParquetFile(double_wrapping, encryption_no,
-                                        internal_key_material);
-        this->ReadEncryptedParquetFile(double_wrapping, encryption_no,
-                                       internal_key_material);
+        this->WriteEncryptedParquetFile(double_wrapping, internal_key_material,
+                                        encryption_no);
+        this->ReadEncryptedParquetFile(double_wrapping, internal_key_material,
+                                       encryption_no);
       }
     }
   }
@@ -292,17 +300,17 @@ TEST_F(TestEncryptionKeyManagement, CheckKeyRotationDoubleWrapping) {
       false);  // key rotation is not supported with local key wrapping
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->WriteEncryptedParquetFile(double_wrapping, encryption_no,
-                                    internal_key_material);
+    this->WriteEncryptedParquetFile(double_wrapping, internal_key_material,
+                                    encryption_no);
   }
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->ReadEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
+    this->ReadEncryptedParquetFile(double_wrapping, internal_key_material, encryption_no);
   }
 
   this->RotateKeys(double_wrapping);
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->ReadEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
+    this->ReadEncryptedParquetFile(double_wrapping, internal_key_material, encryption_no);
   }
 }
 
@@ -314,17 +322,17 @@ TEST_F(TestEncryptionKeyManagement, CheckKeyRotationSingleWrapping) {
       false);  // key rotation is not supported with local key wrapping
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->WriteEncryptedParquetFile(double_wrapping, encryption_no,
-                                    internal_key_material);
+    this->WriteEncryptedParquetFile(double_wrapping, internal_key_material,
+                                    encryption_no);
   }
 
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->ReadEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
+    this->ReadEncryptedParquetFile(double_wrapping, internal_key_material, encryption_no);
   }
 
   this->RotateKeys(double_wrapping);
   for (int encryption_no = 0; encryption_no < 4; encryption_no++) {
-    this->ReadEncryptedParquetFile(double_wrapping, encryption_no, internal_key_material);
+    this->ReadEncryptedParquetFile(double_wrapping, internal_key_material, encryption_no);
   }
 }
 

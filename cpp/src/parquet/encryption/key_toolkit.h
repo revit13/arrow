@@ -30,17 +30,14 @@
 namespace parquet {
 namespace encryption {
 
-// in miliseconds
-using TimePoint = std::chrono::system_clock::time_point;
-
-static constexpr uint64_t kCacheCleanPeriodForKeyRotation = 60 * 60 * 1000;  // 1 hour
+static constexpr uint64_t kCacheCleanPeriodForKeyRotation = 60 * 60;  // 1 hour
 
 // KeyToolkit is a utility that keeps various tools for key management (such as key
 // rotation, kms client instantiation, cache control, etc), plus a number of auxiliary
 // classes for internal use.
 class PARQUET_EXPORT KeyToolkit {
  public:
-  KeyToolkit() { last_cache_clean_for_key_rotation_time_ = internal::CurrentTimePoint(); }
+  KeyToolkit() { last_cache_clean_for_key_rotation_time_ = {}; }
 
   /// KMS client two level cache: token -> KMSInstanceId -> KmsClient
   TwoLevelCacheWithExpiration<std::shared_ptr<KmsClient>>& kms_client_cache_per_token() {
@@ -89,6 +86,7 @@ class PARQUET_EXPORT KeyToolkit {
   TwoLevelCacheWithExpiration<KeyEncryptionKey> key_encryption_key_write_cache_;
   TwoLevelCacheWithExpiration<std::string> key_encryption_key_read_cache_;
   std::shared_ptr<KmsClientFactory> kms_client_factory_;
+  mutable ::arrow::util::Mutex last_cache_clean_for_key_rotation_time_mutex_;
   internal::TimePoint last_cache_clean_for_key_rotation_time_;
 };
 
